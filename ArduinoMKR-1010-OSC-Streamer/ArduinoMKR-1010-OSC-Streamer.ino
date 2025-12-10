@@ -1,163 +1,202 @@
 /*
-================================================================================
-  OSC Sensor Streamer for Arduino MKR WiFi 1010
-  Author: Max Bruckert
+===============================================================================
+ ULTRA-LOW-LATENCY OSC STREAMER — MKR WiFi 1010
+ Includes clipping, smoothing and gamma correction
+===============================================================================
 
-  DESCRIPTION
-  ------------------------------------------------------------------------------
-  - Reads multiple analog and digital inputs
-  - Sends OSC messages over UDP using ONE bundle per cycle (highest efficiency)
-  - Includes change filtering (values sent only when changed)
-  - Adds timing messages:
-        /timestamp    -> raw milliseconds since boot
-        /rtimestamp   -> human-readable runtime (HH:MM:SS:MS)
-        /clock        -> SAME as /rtimestamp (relative clock, no RTC required)
+DOCUMENTATION
+-------------------------------------------------------------------------------
+1) inrange(value)
+   Clips analog values to a fixed numeric range before further processing.
+   Default: 0..1023
 
-  OSC ADDRESS FORMAT
-  ------------------------------------------------------------------------------
-  /analog/A0 <value>
-  /analog/A1 <value>
-  ...
-  /digital/D2 <value>
-  /digital/D3 <value>
-  ...
+2) smoothing(previous, current)
+   Lightweight exponential smoothing to reduce jitter.
+   Lower values = more smoothing, slower response.
+   Higher values = less smoothing, faster response.
+   Ultra-low-latency default: 0.15
 
-  The following messages are ALWAYS included:
-  /timestamp <ms>
-  /rtimestamp "HH:MM:SS:MS"
-  /clock      "HH:MM:SS:MS"    <-- relative runtime, not real date/time
+3) gammaCorrection(value, gamma)
+   Applies perceptual curve shaping.
+   - gamma = 1.0 → no change (linear)
+   - gamma > 1.0 → more sensitivity in lower range
+   - gamma < 1.0 → more sensitivity in upper range
 
-  Designed for MaxMSP, Pure Data, VVVV, Touch Designer, ar any other OSC compatible software
+4) OSC Messages:
+   /analog/Ax          (int)   raw ADC 0..1023
+   /analog-one/Ax      (float) clipped → smoothed → gamma → 0..1 scale
+   /analog-hundred/Ax  (float) same but scaled to -100..100
 
+   Messages are only sent when value changes by more than EPSILON.
 
-  PLEASE INSTALL WiFiNINA, WiFiUdp and OSCBundle from your Library manager in the Arduino IDE
-================================================================================
+===============================================================================
 */
 
 #include <WiFiNINA.h>
 #include <WiFiUdp.h>
-#include <OSCBundle.h>
+#include <OSCMessage.h>
 
-// -----------------------------------------------------------------------------
-// NETWORK CONFIGURATION
-// -----------------------------------------------------------------------------
-IPAddress DESTINATION_IP(192, 168, 1, 140);   // <-- CHANGE THIS: Target computer
-const unsigned int DESTINATION_PORT = 3033;   // <-- CHANGE THIS IF NEEDED:incoming port on the target computer
-const unsigned int SEND_INTERVAL = 5;       // ms
+// ---------------------------------------------------------------------------
+// CONFIGURATION
+// ---------------------------------------------------------------------------
+IPAddress DEST_IP(192,168,1,173); // Your computer IP address
+const int DEST_PORT = 3033; // Your computer input port
 
-const char* WIFI_SSID     = "YOUR_WIFI_NETWORK";    // <-- CHANGE THIS: Wifi network it should connect to
-const char* WIFI_PASSWORD = "YOUR_PASSWORD";   //<-- CHANGE THIS: Wifi password
+const char* SSID     = "GRAME"; // Wifi SSID the Arduino should connect to
+const char* PASSWORD = "internet4you"; // Wifi password
 
-// -----------------------------------------------------------------------------
-// PIN SETUP
-// -----------------------------------------------------------------------------
-const int analogPins[]  = {A0, A1, A2, A3, A4, A5, A6};
-const int numAnalogPins = sizeof(analogPins) / sizeof(analogPins[0]);
+WiFiUDP udp;
 
-const int digitalPins[] = {2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14}; // IGNORE pins 0 and 1 as they are used for Tx and Rx
-const int numDigitalPins = sizeof(digitalPins) / sizeof(digitalPins[0]);
+const float EPS = 0.001f;       // change filter threshold
+float GAMMA = 1.4f;             // editable: perceptual curve shaping
 
-int lastAnalogValues[7]   = {0};
-int lastDigitalValues[13] = {0};
+// ---------------------------------------------------------------------------
+// ANALOG & DIGITAL PINS
+// ---------------------------------------------------------------------------
+const uint8_t A_PINS[] = {A0,A1,A2,A3,A4,A5,A6};
+const uint8_t N_A = 7;
 
-WiFiUDP Udp;
+const uint8_t D_PINS[] = {2,3,4,5,6,7,8,9,10,11,12,13,14}; // Pins 0 and 1 are ignored as they also act as Rx Tx.
+const uint8_t N_D = 13;
 
-// -----------------------------------------------------------------------------
-// CONNECT TO WIFI
-// -----------------------------------------------------------------------------
-void connectToWiFi() {
-  WiFi.disconnect();
-  delay(200);
+// ---------------------------------------------------------------------------
+// STATE BUFFERS
+// ---------------------------------------------------------------------------
+uint16_t lastRaw[N_A]     = {0};
+float    lastOne[N_A]     = {0};
+float    lastHundred[N_A] = {0};
+uint8_t  lastDig[N_D]     = {0};
 
-  while (WiFi.status() != WL_CONNECTED) {
-    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-    delay(2000);
-  }
+// ---------------------------------------------------------------------------
+// USER-EDITABLE PROCESSING FUNCTIONS
+// ---------------------------------------------------------------------------
+
+// 1) CLIPPING : change the mimum and maximum range to clip the raw values. 
+// This will be "coocked" as /analog-one/Ax -> 0..1 scale AND /analog-hundred/Ax -> -100..100
+float inrange(float v) {
+    if (v < 0) return 0.0f; // minimum clip
+    if (v > 1023) return 1023.0f; // maximum clip
+    return v;
 }
 
-// -----------------------------------------------------------------------------
-// RELATIVE TIME FORMATTER (HH:MM:SS:MS)
-// -----------------------------------------------------------------------------
-void buildRelativeTime(char* buffer, size_t size) {
-  unsigned long t  = millis();
-  unsigned long ms = t % 1000;
-  unsigned long s  = (t / 1000) % 60;
-  unsigned long m  = (t / 60000) % 60;
-  unsigned long h  = (t / 3600000);
-
-  snprintf(buffer, size, "%02lu:%02lu:%02lu:%03lu", h, m, s, ms);
+// 2) SMOOTHING (lightweight and ultra-fast)
+float smoothing(float prev, float cur) {
+    const float k = 0.15f; // editable smoothing coefficient
+    return prev + (cur - prev) * k;
 }
 
-// -----------------------------------------------------------------------------
+// 3) GAMMA CORRECTION
+float gammaCorrection(float v, float g) {
+    // v must be 0..1
+    return powf(v, g);
+}
+
+// ---------------------------------------------------------------------------
+// SEND OSC (minimal, no bundle overhead)
+// ---------------------------------------------------------------------------
+void sendOSC(const char* addr, float v) {
+    OSCMessage m(addr);
+    m.add(v);
+    udp.beginPacket(DEST_IP, DEST_PORT);
+    m.send(udp);
+    udp.endPacket();
+}
+
+void sendOSC(const char* addr, int v) {
+    OSCMessage m(addr);
+    m.add((int32_t)v);
+    udp.beginPacket(DEST_IP, DEST_PORT);
+    m.send(udp);
+    udp.endPacket();
+}
+
+// ---------------------------------------------------------------------------
+// WIFI
+// ---------------------------------------------------------------------------
+void wifiConnect() {
+    while (WiFi.status() != WL_CONNECTED) {
+        WiFi.begin(SSID, PASSWORD);
+        delay(1200);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // SETUP
-// -----------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
 void setup() {
-  Serial.begin(115200);
-  delay(1000);
+    Serial.begin(115200);
+    wifiConnect();
+    udp.begin(DEST_PORT);
 
-  connectToWiFi();
-  Udp.begin(DESTINATION_PORT);
+    for (uint8_t i=0; i<N_D; i++)
+        pinMode(D_PINS[i], INPUT_PULLUP);
 
-  // Setup digital pins as inputs
-  for (int i = 0; i < numDigitalPins; i++) {
-    pinMode(digitalPins[i], INPUT_PULLUP);
-  }
+    analogReadResolution(10);
 }
 
-// -----------------------------------------------------------------------------
-// MAIN LOOP
-// -----------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// MAIN LOOP (no delay → ultra-low-latency)
+// ---------------------------------------------------------------------------
 void loop() {
 
-  OSCBundle bundle;
+    // ------------------
+    // ANALOG
+    // ------------------
+    for (uint8_t i=0; i<N_A; i++) {
 
-  // ------------------------
-  // ANALOG INPUTS (change filter)
-  // ------------------------
-  for (int i = 0; i < numAnalogPins; i++) {
-    int value = analogRead(analogPins[i]);
-    if (value != lastAnalogValues[i]) {
-      char address[32];
-      snprintf(address, sizeof(address), "/analog/A%d", i);
-      bundle.add(address).add((int32_t)value);
-      lastAnalogValues[i] = value;
+        analogRead(A_PINS[i]);              // discard first sample
+        int raw = analogRead(A_PINS[i]);    // real ADC result
+
+        // RAW
+        if (raw != lastRaw[i]) {
+            char addr[24];
+            sprintf(addr, "/analog/A%d", i);
+            sendOSC(addr, raw);
+            lastRaw[i] = raw;
+        }
+
+        // PROCESSING
+        float clipped = inrange((float)raw);
+
+        static float smoothVal[7] = {0};
+        float s = smoothing(smoothVal[i], clipped);
+        smoothVal[i] = s;
+
+        float vNorm = s * 0.0009775171f;    // 1/1023
+        float vGamma = gammaCorrection(vNorm, GAMMA);
+
+        // 0..1 OUTPUT
+        if (fabs(vGamma - lastOne[i]) > EPS) {
+            char addr[32];
+            sprintf(addr, "/analog-one/A%d", i);
+            sendOSC(addr, vGamma);
+            lastOne[i] = vGamma;
+        }
+
+        // -100..100 OUTPUT
+        float vHund = (vGamma * 200.0f) - 100.0f;
+
+        if (fabs(vHund - lastHundred[i]) > EPS) {
+            char addr[32];
+            sprintf(addr, "/analog-hundred/A%d", i);
+            sendOSC(addr, vHund);
+            lastHundred[i] = vHund;
+        }
     }
-  }
 
-  // ------------------------
-  // DIGITAL INPUTS (change filter)
-  // ------------------------
-  for (int i = 0; i < numDigitalPins; i++) {
-    int pin = digitalPins[i];
-    int value = digitalRead(pin);
-    if (value != lastDigitalValues[i]) {
-      char address[32];
-      snprintf(address, sizeof(address), "/digital/D%d", pin);
-      bundle.add(address).add((int32_t)value);
-      lastDigitalValues[i] = value;
+    // ------------------
+    // DIGITAL
+    // ------------------
+    for (uint8_t i=0; i<N_D; i++) {
+        uint8_t v = digitalRead(D_PINS[i]);
+        if (v != lastDig[i]) {
+            char addr[24];
+            sprintf(addr, "/digital/D%d", D_PINS[i]);
+            sendOSC(addr, v);
+            lastDig[i] = v;
+        }
     }
-  }
 
-  // ------------------------
-  // RAW TIMESTAMP (always)
-  // ------------------------
-  bundle.add("/timestamp").add((int32_t)millis());
-
-  // ------------------------
-  // HUMAN READABLE TIME (always)
-  // ------------------------
-  char rts[32];
-  buildRelativeTime(rts, sizeof(rts));
-
-  bundle.add("/rtimestamp").add(rts);
-  bundle.add("/clock").add(rts);   // same content, different OSC name
-
-  // ------------------------
-  // SEND BUNDLE
-  // ------------------------
-  Udp.beginPacket(DESTINATION_IP, DESTINATION_PORT);
-  bundle.send(Udp);
-  Udp.endPacket();
-
-  delay(SEND_INTERVAL);
+    // TIMESTAMP (always sent)
+    sendOSC("/timestamp", (int)millis());
 }
