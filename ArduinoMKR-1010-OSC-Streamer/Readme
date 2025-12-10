@@ -1,0 +1,4 @@
+ULTRA-LOW-LATENCY OSC STREAMER — MKR WiFi 1010
+
+Turns the Arduino MKR Wifi 1010 into a wireless device, connecting to a given Wifi network. All analog and digital inputs are seen as OSC inputs.
+Includes clipping, smoothing and gamma correction
