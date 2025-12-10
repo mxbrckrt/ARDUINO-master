@@ -39,11 +39,11 @@ DOCUMENTATION
 // ---------------------------------------------------------------------------
 // CONFIGURATION
 // ---------------------------------------------------------------------------
-IPAddress DEST_IP(192,168,1,173); // Your computer IP address
-const int DEST_PORT = 3033; // Your computer input port
+IPAddress DEST_IP(192,168,X,X); // Your computer IP address
+const int DEST_PORT = XXX; // Your computer input port
 
-const char* SSID     = "GRAME"; // Wifi SSID the Arduino should connect to
-const char* PASSWORD = "internet4you"; // Wifi password
+const char* SSID     = "XXX"; // Wifi SSID the Arduino should connect to
+const char* PASSWORD = "XXX"; // Wifi password
 
 WiFiUDP udp;
 
