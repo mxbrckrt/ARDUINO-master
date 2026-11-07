@@ -1,0 +1,41 @@
+1. Le Cœur (Microcontrôleur)
+Composant : Seeed Studio XIAO ESP32-S3 (ou la version "Sense" si tu veux un micro et un port SD en bonus, mais la version standard suffit).
+
+Pourquoi : Circuit de charge LiPo intégré, processeur Dual Core 240MHz (idéal pour séparer les tâches WiFi et IMU), format miniature.
+
+Alternative : Adafruit Feather ESP32-S3. Plus grande, mais possède un vrai connecteur JST pour la batterie, ce qui évite de souder la LiPo directement sur la carte.
+
+2. Le Cerveau Inertiel (IMU)
+Composant : Adafruit 9-DOF Absolute Orientation IMU - BNO055.
+
+Pourquoi : C'est un capteur "Intelligence Artificielle" avant l'heure. Il possède son propre processeur (Cortex M0) qui fusionne l'accéléromètre, le gyroscope et le magnétomètre. Il te sort des Quaternions stables sans que tu aies à écrire une seule ligne de trigonométrie.
+
+Connectique : Prends la version avec connecteurs STEMMA QT / Qwiic pour faciliter le câblage.
+
+3. L'Énergie
+Composant : Batterie LiPo 3.7V (format 500mAh ou 800mAh).
+
+Format : Cherche une batterie "plate" qui fait environ la taille de tes deux pouces côte à côte.
+
+Important : Si tu prends la XIAO, tu devras probablement couper le connecteur JST de la batterie pour souder les fils directement sur les pads au dos de la carte (respecte bien la polarité + et - !).
+
+4. Les Accessoires de Montage
+Connecteurs : Câble STEMMA QT vers fils nus (4 pins). Cela te permet de brancher le câble dans le capteur BNO055 et de souder l'autre extrémité sur les broches SDA/SCL/3V/GND de la XIAO.
+
+Interrupteur : Un petit Mini Slide Switch. Indispensable pour couper physiquement la batterie si tu ne veux pas compter uniquement sur le Deep Sleep.
+
+Bouton : Un bouton poussoir miniature (Tactile Switch) pour ton système de calibration/handshake.
+
+
+-------------------------
+CABLAGE DANS LA SEEDSTUDIO
+
+     (D0)  [ ]        [ ] (5V)
+     (D1)  [ ]        [ ] (GND) <--- FIL NOIR
+     (D2)  [ ]        [ ] (3V3) <--- FIL ROUGE
+     (D3)  [ ]        [ ] (D10)
+FIL BLEU -> (D4)  [ ]        [ ] (D9)
+FIL JAUNE -> (D5)  [ ]        [ ] (D8)
+             ------------
+
+-------------------------

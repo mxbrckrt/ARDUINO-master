@@ -1,0 +1,22 @@
+# Fichiers système
+.DS_Store
+.DS_Store?
+._*
+Thumbs.db
+
+# Fichiers temporaires et sauvegardes Max/MSP
+*.~*
+*.bak
+*.pat~
+*.maxpat~
+*.gendsp~
+*.maxhelp~
+
+# Caches Max
+max-cache/
+.max-cache/
+
+# Médias lourds enregistrés par erreur (optionnel)
+*.wav
+*.aif
+*.aiff

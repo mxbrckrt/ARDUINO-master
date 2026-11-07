@@ -1,0 +1,46 @@
+# MKR-OSC-Inertial-Streamer 🛰️
+
+### ✍️ Author: **Max Bruckert** ### 📅 Date: **February 20, 2026**
+
+---
+
+## 🚀 Overview
+**MKR-OSC-Inertial-Streamer** is a high-performance firmware for the **Arduino MKR WiFi 1010**. It transforms the board into a wireless gesture-sensing device, streaming orientation and motion analytics via **OSC (Open Sound Control)**.
+
+Designed for **Max/MSP**, **PureData**, and **IRCAM Spat5**, it features zero-config IP discovery and advanced battery management for live performance.
+
+## 🛠 Features
+* **Dynamic Handshake:** No hardcoded host IP. Send any OSC message to port `8000` to start the 200Hz data stream.
+* **Intelligent Power:** Single click to wake up, 4-second hold to shut down (Deep Sleep).
+* **Advanced Motion Math:** Includes `/energy` (intensity) and `/jerk` (impact detection).
+* **Pro Signal Path:** 8x hardware oversampling for jitter-free data.
+* **Persistent Calibration:** Saves sensor offsets to Flash memory (survives power cycles).
+
+## 📡 OSC API Reference
+
+| Address | Type | Description |
+| :--- | :--- | :--- |
+| `/roll` | `float` | Lateral rotation (-180° to 180°). |
+| `/pitch` | `float` | Forward/Backward tilt (-90° to 90°). |
+| `/energy` | `float` | Magnitude of movement (0.0 at rest). |
+| `/jerk` | `float` | Intensity of sudden shakes/impacts. |
+| `/accelx/y/z`| `float` | Normalized raw acceleration (0.0 to 1.0). |
+| `/battery` | `float` | Battery voltage (e.g., 4.2V = full). |
+
+### Inbound (Port 8000)
+| Address | Action |
+| :--- | :--- |
+| `any message` | Initiates Handshake (sets host IP). EX. send /hello on 255.255.255.255 8000 to iniate handshake|
+| `/calibrate` | Sets current position as "Zero" and saves to Flash. |
+
+## 💡 LED Feedback Guide
+* **Slow Breathing (1s):** WiFi connected. Waiting for Handshake.
+* **Solid ON:** Data streaming active.
+* **Fast Blink:** WiFi disconnected or signal lost.
+* **Triple Flash:** Shutdown sequence confirmed.
+
+## 🔧 Setup
+1. Use the Arduino Library Manager to install: `WiFiNINA`, `OSC`, `FlashStorage`, and `Arduino Low Power`.
+2. Configure your SSID/Pass in the code.
+3. Wire a pushbutton between **Pin 7** and **GND**.
+4. Wire your 3-axis accelerometer to **A1, A2, A3**.
